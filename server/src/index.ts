@@ -103,6 +103,54 @@ app.post("/api/match/bot/turn", auth, async (req,res) => {
   const damageToBot = resolveTurn(p as Stats,bot,playerTactic);
   const damageToPlayer = resolveTurn(bot,p as Stats,botTactic);
   const log = {playerTactic,botTactic,damageToBot,damageToPlayer,botPower:combatPower(bot)};
+  // === ПРОСТОЙ БОТ ДЛЯ TELEGRAM ===
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const WEBAPP_URL = process.env.WEBAPP_URL;
+
+if (BOT_TOKEN) {
+  let offset = 0;
+  
+  // Функция для отправки сообщений
+  const sendMessage = async (chatId: number, text: string, replyMarkup?: any) => {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, reply_markup: replyMarkup })
+    });
+  };
+
+  // Бесконечный цикл проверки новых сообщений
+  const poll = async () => {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${offset}&timeout=30`);
+      const data = await res.json();
+      
+      if (data.ok && data.result.length > 0) {
+        for (const update of data.result) {
+          offset = update.update_id + 1;
+          
+          if (update.message && update.message.text === "/start") {
+            const chatId = update.message.chat.id;
+            const keyboard = WEBAPP_URL ? {
+              inline_keyboard: [[
+                { text: "🎮 Играть в Coin Battle", web_app: { url: WEBAPP_URL } }
+              ]]
+            } : undefined;
+            
+            await sendMessage(chatId, "Добро пожаловать в Coin Battle! Нажмите кнопку ниже, чтобы начать.", keyboard);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Bot polling error:", e);
+    }
+    // Повторяем через 1 секунду
+    setTimeout(poll, 1000);
+  };
+
+  poll();
+  console.log("Telegram Bot polling started!");
+}
   // This route is a combat-rule prototype. Persist full HP/round state before public release.
   res.json({ok:true,log,note:"Для полноценного боя нужно хранить HP и номер раунда на сервере."});
 });
