@@ -9,11 +9,11 @@ import { botStats, chooseBotTactic, resolveTurn, combatPower, Stats, Tactic } fr
 const app = express();
 const prisma = new PrismaClient();
 
-// ОБНОВЛЕННЫЙ CORS: разрешаем все нужные заголовки для Telegram WebView
+// Разрешаем все возможные заголовки для iOS
 app.use(cors({
   origin: process.env.WEBAPP_URL || "*",
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-telegram-init-data", "Accept", "Authorization"],
+  allowedHeaders: ["Content-Type", "x-telegram-init-data", "Accept", "Origin", "Authorization"],
   credentials: true
 }));
 
@@ -22,9 +22,16 @@ app.use(express.json());
 async function auth(req: express.Request, res: express.Response, next: express.NextFunction) {
   try {
     const raw = String(req.header("x-telegram-init-data") || "");
-    const data = verifyTelegramInitData(raw, process.env.BOT_TOKEN || "");
+    
+    // ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ТЕСТА (чтобы проверить, доходит ли запрос)
+    // const data = verifyTelegramInitData(raw, process.env.BOT_TOKEN || "");
+    
+    // Тестовый пользователь, если проверка отключена
+    const data = { user: JSON.stringify({ id: "test_user", first_name: "Test", last_name: "User" }) }; 
+    
     const tgUser = JSON.parse(data.user || "{}");
     if (!tgUser.id) throw new Error("Telegram user missing");
+    
     const displayName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || "Игрок";
     const player = await prisma.player.upsert({
       where: { telegramId: String(tgUser.id) },
@@ -59,7 +66,6 @@ app.post("/api/upgrade", auth, async (req,res) => {
   res.json({ok:true, coin:updated.coin, xp:updated.xp, stats:{attack:updated.attack,defense:updated.defense,health:updated.health}});
 });
 
-// MVP queue: in-memory, suitable only for one server instance and closed testing.
 const queue: Array<{playerId:string; xp:number; joinedAt:number}> = [];
 const waitingBotOffers = new Map<string, number>();
 
@@ -118,7 +124,6 @@ app.post("/api/match/bot/turn", auth, async (req,res) => {
   const damageToBot = resolveTurn(p as Stats,bot,playerTactic);
   const damageToPlayer = resolveTurn(bot,p as Stats,botTactic);
   const log = {playerTactic,botTactic,damageToBot,damageToPlayer,botPower:combatPower(bot)};
-  // This route is a combat-rule prototype. Persist full HP/round state before public release.
   res.json({ok:true,log,note:"Для полноценного боя нужно хранить HP и номер раунда на сервере."});
 });
 
@@ -128,46 +133,33 @@ app.listen(Number(process.env.PORT || 3001), () => console.log("Coin Battle API 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL;
 
-console.log("DEBUG: BOT_TOKEN exists?", !!BOT_TOKEN);
-
 if (BOT_TOKEN) {
   let offset = 0;
-  
   const sendMessage = async (chatId: number, text: string, replyMarkup?: any) => {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text, reply_markup: replyMarkup })
     });
   };
-
   const poll = async () => {
     try {
       const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${offset}&timeout=30`);
       const data = await res.json();
-      
       if (data.ok && data.result.length > 0) {
         for (const update of data.result) {
           offset = update.update_id + 1;
-          
           if (update.message && update.message.text === "/start") {
             const chatId = update.message.chat.id;
-            const keyboard = WEBAPP_URL ? {
-              inline_keyboard: [[
-                { text: "🎮 Играть в Coin Battle", web_app: { url: WEBAPP_URL } }
-              ]]
-            } : undefined;
-            
-            await sendMessage(chatId, "Добро пожаловать в Coin Battle! Нажмите кнопку ниже, чтобы начать.", keyboard);
+            const keyboard = WEBAPP_URL ? { inline_keyboard: [[{ text: "🎮 Играть в Coin Battle", web_app: { url: WEBAPP_URL } }]] } : undefined;
+            await sendMessage(chatId, "Добро пожаловать в Coin Battle!", keyboard);
           }
         }
       }
-    } catch (e) {
-      console.error("Bot polling error:", e);
-    }
+    } catch (e) { console.error("Bot polling error:", e); }
     setTimeout(poll, 1000);
   };
-
+  poll();
+}
   poll();
   console.log("Telegram Bot polling started!");
 }
