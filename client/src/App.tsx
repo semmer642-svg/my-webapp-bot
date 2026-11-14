@@ -13,38 +13,45 @@ export default function App() {
   const [offer, setOffer] = useState(false);
   const [match, setMatch] = useState<any>(null);
 
-  async function api(path: string, body?: any) {
+  // Универсальная функция для запросов (используем XMLHttpRequest вместо fetch для обхода багов iOS)
+  async function api(path: string, body?: any): Promise<any> {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData || '';
-    
-    // ДИАГНОСТИКА: Покажет, дошли ли мы до запроса и есть ли данные от Telegram
-    alert("Дошли до api. Длина initData: " + initData.length);
 
     if (!initData) {
       throw new Error("Нет данных от Telegram. Откройте игру через бота.");
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(body ? 'POST' : 'GET', `${API_URL}${path}`, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.setRequestHeader('x-telegram-init-data', initData);
+      
+      xhr.timeout = 60000; // 60 секунд на "пробуждение" Render
 
-    try {
-      const r = await fetch(`${API_URL}${path}`, {
-        method: body ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Ошибка запроса');
-      return d;
-    } catch (e: any) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') {
-        throw new Error("Сервер просыпается. Подождите и попробуйте снова.");
-      }
-      throw e;
-    }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (e) {
+            reject(new Error("Ошибка парсинга ответа сервера"));
+          }
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            reject(new Error(err.error || `Ошибка сервера: ${xhr.status}`));
+          } catch {
+            reject(new Error(`Ошибка сервера: ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Сетевая ошибка (Load failed)"));
+      xhr.ontimeout = () => reject(new Error("Сервер просыпается. Подождите и попробуйте снова."));
+      
+      xhr.send(body ? JSON.stringify(body) : null);
+    });
   }
 
   async function load() {
@@ -76,7 +83,7 @@ export default function App() {
     }
   }
 
-  // Увеличенная задержка для обхода бага iOS 18
+  // Логика запуска с задержкой для iOS
   useEffect(() => {
     let isMounted = true;
 
@@ -84,7 +91,7 @@ export default function App() {
       if (!isMounted) return;
       setTimeout(() => {
         if (isMounted) load();
-      }, 2000); // Ждем 2 секунды
+      }, 2000); // Увеличенная задержка для iOS 18
     };
 
     if (document.visibilityState === 'visible') {
