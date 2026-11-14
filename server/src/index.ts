@@ -27,13 +27,16 @@ async function auth(req: express.Request, res: express.Response, next: express.N
     next();
   } catch (e:any) { res.status(401).json({ error: e.message || "Unauthorized" }); }
 }
+
 app.get("/api/health", (_req,res) => res.json({ok:true}));
+
 app.get("/api/me", auth, (req,res) => {
   const p = (req as any).player;
   res.json({id:p.id, displayName:p.displayName, coin:p.coin, xp:p.xp, level:p.level,
     stats:{attack:p.attack, defense:p.defense, health:p.health},
     power:combatPower(p)});
 });
+
 app.post("/api/upgrade", auth, async (req,res) => {
   const schema = z.object({stat:z.enum(["attack","defense","health"])});
   const parsed = schema.safeParse(req.body);
@@ -51,6 +54,7 @@ app.post("/api/upgrade", auth, async (req,res) => {
 // MVP queue: in-memory, suitable only for one server instance and closed testing.
 const queue: Array<{playerId:string; xp:number; joinedAt:number}> = [];
 const waitingBotOffers = new Map<string, number>();
+
 app.post("/api/match/queue", auth, async (req,res) => {
   const p = (req as any).player;
   const now = Date.now();
@@ -73,6 +77,7 @@ app.post("/api/match/queue", auth, async (req,res) => {
   }
   res.json({status:"searching",elapsed,range});
 });
+
 app.post("/api/match/cancel", auth, (req,res) => {
   const p = (req as any).player;
   const i = queue.findIndex(x => x.playerId === p.id);
@@ -80,6 +85,7 @@ app.post("/api/match/cancel", auth, (req,res) => {
   waitingBotOffers.delete(p.id);
   res.json({ok:true});
 });
+
 app.post("/api/match/bot/accept", auth, async (req,res) => {
   const p = (req as any).player;
   if (!waitingBotOffers.has(p.id)) return res.status(400).json({error:"Предложение боя с ботом не найдено"});
@@ -90,6 +96,7 @@ app.post("/api/match/bot/accept", auth, async (req,res) => {
   const match = await prisma.match.create({data:{playerId:p.id,opponentType:"bot",status:"active",stake:0}});
   res.json({status:"active",matchId:match.id,opponent:{name:"Тренировочный бот",label:"БОТ",stats:bot},playerStats:{attack:p.attack,defense:p.defense,health:p.health}});
 });
+
 app.post("/api/match/bot/turn", auth, async (req,res) => {
   const p = (req as any).player;
   const schema = z.object({matchId:z.string(), tactic:z.enum(["aggressive","guard","recover","balanced"])});
@@ -103,16 +110,21 @@ app.post("/api/match/bot/turn", auth, async (req,res) => {
   const damageToBot = resolveTurn(p as Stats,bot,playerTactic);
   const damageToPlayer = resolveTurn(bot,p as Stats,botTactic);
   const log = {playerTactic,botTactic,damageToBot,damageToPlayer,botPower:combatPower(bot)};
-  // === ПРОСТОЙ БОТ ДЛЯ TELEGRAM ===
+  // This route is a combat-rule prototype. Persist full HP/round state before public release.
+  res.json({ok:true,log,note:"Для полноценного боя нужно хранить HP и номер раунда на сервере."});
+});
+
+app.listen(Number(process.env.PORT || 3001), () => console.log("Coin Battle API listening"));
+
+// === ПРОСТОЙ БОТ ДЛЯ TELEGRAM ===
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL;
-  
+
 console.log("DEBUG: BOT_TOKEN exists?", !!BOT_TOKEN);
-  
+
 if (BOT_TOKEN) {
   let offset = 0;
   
-  // Функция для отправки сообщений
   const sendMessage = async (chatId: number, text: string, replyMarkup?: any) => {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: "POST",
@@ -121,7 +133,6 @@ if (BOT_TOKEN) {
     });
   };
 
-  // Бесконечный цикл проверки новых сообщений
   const poll = async () => {
     try {
       const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${offset}&timeout=30`);
@@ -146,14 +157,9 @@ if (BOT_TOKEN) {
     } catch (e) {
       console.error("Bot polling error:", e);
     }
-    // Повторяем через 1 секунду
     setTimeout(poll, 1000);
   };
 
   poll();
   console.log("Telegram Bot polling started!");
 }
-  // This route is a combat-rule prototype. Persist full HP/round state before public release.
-  res.json({ok:true,log,note:"Для полноценного боя нужно хранить HP и номер раунда на сервере."});
-});
-app.listen(Number(process.env.PORT || 3001), () => console.log("Coin Battle API listening"));
