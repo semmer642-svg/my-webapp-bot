@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 
 declare global { interface Window { Telegram?: any } }
 
+// Адрес вашего сервера на Render
+const API_URL = "https://my-webapp-bot-cr76.onrender.com";
+
 type Profile = { id: string; displayName: string; coin: number; xp: number; level: number; stats: { attack: number; defense: number; health: number }; power: number };
 
 export default function App() {
@@ -20,11 +23,13 @@ export default function App() {
       throw new Error("Нет данных от Telegram. Откройте игру через бота.");
     }
 
-    const r = await fetch(path, {
+    // Используем API_URL для формирования полного адреса
+    const r = await fetch(`${API_URL}${path}`, {
       method: body ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
       body: body ? JSON.stringify(body) : undefined
     });
+    
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Ошибка запроса');
     return d;
