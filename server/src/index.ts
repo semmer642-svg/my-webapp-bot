@@ -8,7 +8,14 @@ import { botStats, chooseBotTactic, resolveTurn, combatPower, Stats, Tactic } fr
 
 const app = express();
 const prisma = new PrismaClient();
-app.use(cors({ origin: process.env.WEBAPP_URL || true }));
+
+// ИСПРАВЛЕННЫЙ CORS: разрешаем вашему сайту на Vercel делать запросы
+app.use(cors({ 
+  origin: process.env.WEBAPP_URL || "*", // Разрешаем запросы с адреса сайта
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-telegram-init-data"] // Разрешаем кастомный заголовок
+}));
+
 app.use(express.json());
 
 async function auth(req: express.Request, res: express.Response, next: express.NextFunction) {
