@@ -19,18 +19,22 @@ export default function App() {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData || '';
     
+    // Не выбрасываем ошибку сразу, если initData пустой, 
+    // чтобы дать шанс серверу ответить (вдруг он это обработает)
     if (!initData) {
-      throw new Error("Нет данных от Telegram. Откройте игру через бота.");
+      console.warn("initData пуст, но пробуем отправить запрос");
     }
 
-    // Таймаут, чтобы дать серверу Render время проснуться
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 секунд на "пробуждение" Render
 
     try {
       const r = await fetch(`${API_URL}${path}`, {
         method: body ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-telegram-init-data': initData || '' 
+        },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
@@ -59,14 +63,14 @@ export default function App() {
       // Ждем, пока Telegram передаст initData (актуально для iOS)
       let initData = tg?.initData || '';
       let attempts = 0;
-      while (!initData && attempts < 15) { // Ждем до 4.5 секунд
-        await new Promise(r => setTimeout(r, 300));
+      while (!initData && attempts < 15) {
+        await new Promise(r => setTimeout(r, 200));
         initData = window.Telegram?.WebApp?.initData || '';
         attempts++;
       }
 
       if (!initData) {
-        setMessage('Не удалось получить данные от Telegram. Попробуйте закрыть и открыть игру снова.');
+        setMessage('Telegram не передал данные. Попробуйте перезапустить бота.');
         return;
       }
 
@@ -78,12 +82,33 @@ export default function App() {
     }
   }
 
+  // Логика запуска с учетом бага iOS 18
   useEffect(() => {
-    // Запускаем загрузку с небольшой задержкой
-    const timer = setTimeout(() => {
-      load();
-    }, 300);
-    return () => clearTimeout(timer);
+    let isMounted = true;
+
+    const startLoad = () => {
+      if (!isMounted) return;
+      // Дополнительная задержка, чтобы Telegram успел все передать
+      setTimeout(() => load(), 500);
+    };
+
+    // Если страница уже видима
+    if (document.visibilityState === 'visible') {
+      startLoad();
+    } else {
+      // Ждем, пока страница станет видимой
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          startLoad();
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   async function upgrade(stat: string) {
@@ -116,7 +141,6 @@ export default function App() {
     setSearch(false); setOffer(false); setMessage('Поиск отменён.');
   }
 
-  // Если профиля нет — показываем экран загрузки или ошибку
   if (!profile) return (
     <main className="wrap">
       <h1>⚔️ Coin Battle</h1>
