@@ -106,7 +106,9 @@ app.post("/api/match/bot/turn", auth, async (req,res) => {
   // === ПРОСТОЙ БОТ ДЛЯ TELEGRAM ===
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL;
-
+  
+console.log("DEBUG: BOT_TOKEN exists?", !!BOT_TOKEN);
+  
 if (BOT_TOKEN) {
   let offset = 0;
   
