@@ -14,7 +14,7 @@ export default function App() {
   const [offer, setOffer] = useState(false);
   const [match, setMatch] = useState<any>(null);
 
-  // Функция для запросов (с защитой от пустого initData)
+  // Универсальная функция для запросов
   async function api(path: string, body?: any) {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData || '';
@@ -23,16 +23,29 @@ export default function App() {
       throw new Error("Нет данных от Telegram. Откройте игру через бота.");
     }
 
-    // Используем API_URL для формирования полного адреса
-    const r = await fetch(`${API_URL}${path}`, {
-      method: body ? 'POST' : 'GET',
-      headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Ошибка запроса');
-    return d;
+    // Таймаут, чтобы дать серверу Render время проснуться
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+    try {
+      const r = await fetch(`${API_URL}${path}`, {
+        method: body ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Ошибка запроса');
+      return d;
+    } catch (e: any) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error("Сервер просыпается. Подождите и попробуйте снова.");
+      }
+      throw e;
+    }
   }
 
   async function load() {
@@ -42,6 +55,21 @@ export default function App() {
         tg.ready();
         tg.expand();
       }
+
+      // Ждем, пока Telegram передаст initData (актуально для iOS)
+      let initData = tg?.initData || '';
+      let attempts = 0;
+      while (!initData && attempts < 15) { // Ждем до 4.5 секунд
+        await new Promise(r => setTimeout(r, 300));
+        initData = window.Telegram?.WebApp?.initData || '';
+        attempts++;
+      }
+
+      if (!initData) {
+        setMessage('Не удалось получить данные от Telegram. Попробуйте закрыть и открыть игру снова.');
+        return;
+      }
+
       const p = await api('/api/me');
       setProfile(p);
       setMessage('Готов к бою!');
@@ -51,7 +79,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Небольшая задержка, чтобы Telegram успел передать данные
+    // Запускаем загрузку с небольшой задержкой
     const timer = setTimeout(() => {
       load();
     }, 300);
